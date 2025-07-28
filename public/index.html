@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Pro en Tiempo Real</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Librería de Emojis -->
+    <script type="module" src="https://cdn.jsdelivr.net/npm/emoji-picker-element@^1/index.js"></script>
+</head>
+<body class="bg-gray-900 flex flex-col h-screen font-sans">
+    <header class="bg-gray-800 shadow-lg p-4 text-white text-center">
+        <h1 class="text-xl font-bold">Chat Pro 🚀</h1>
+    </header>
+
+    <ul id="messages" class="flex-1 p-4 space-y-4 overflow-y-auto"></ul>
+
+    <div id="emoji-picker-container" class="hidden absolute bottom-20 right-4">
+        <emoji-picker class="dark"></emoji-picker>
+    </div>
+
+    <form id="form" class="bg-gray-800 p-4 flex items-center gap-2">
+        <input id="username" type="text" placeholder="Tu nombre" required class="bg-gray-700 text-white p-2 rounded-md w-1/4">
+        
+        <div class="relative flex-1">
+            <input id="input" placeholder="Escribe un mensaje..." class="bg-gray-700 text-white p-2 rounded-md w-full">
+            <button id="emoji-btn" type="button" class="absolute right-2 top-1/2 -translate-y-1/2 text-xl">😀</button>
+        </div>
+        
+        <label for="file-upload" class="bg-gray-600 p-2 rounded-md cursor-pointer hover:bg-gray-500">📎</label>
+        <input id="file-upload" type="file" class="hidden">
+        
+        <button type="submit" class="bg-indigo-600 font-bold py-2 px-4 rounded-md hover:bg-indigo-700">Enviar</button>
+    </form>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const form = document.getElementById('form');
+        const input = document.getElementById('input');
+        const usernameInput = document.getElementById('username');
+        const messages = document.getElementById('messages');
+        const fileUpload = document.getElementById('file-upload');
+        const emojiBtn = document.getElementById('emoji-btn');
+        const emojiPickerContainer = document.getElementById('emoji-picker-container');
+
+        // --- Lógica de Emojis ---
+        emojiBtn.addEventListener('click', () => emojiPickerContainer.classList.toggle('hidden'));
+        document.querySelector('emoji-picker').addEventListener('emoji-click', event => {
+            input.value += event.detail.unicode;
+            emojiPickerContainer.classList.add('hidden');
+        });
+
+        // --- Lógica de subida de archivos ---
+        fileUpload.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            try {
+                const res = await fetch('/upload', { method: 'POST', body: formData });
+                const data = await res.json();
+                socket.emit('chat message', { user: usernameInput.value, type: data.type, url: data.url });
+            } catch (err) {
+                console.error('Error al subir archivo:', err);
+                alert('No se pudo subir el archivo.');
+            }
+        });
+
+        // --- Lógica del chat ---
+        function addMessage(msg) {
+            const item = document.createElement('li');
+            let content = '';
+            if (msg.type === 'image') {
+                content = `<img src="${msg.url}" class="max-w-xs rounded-md" alt="Imagen enviada">`;
+            } else if (msg.type === 'video') {
+                content = `<video src="${msg.url}" controls class="max-w-xs rounded-md"></video>`;
+            } else {
+                content = `<p class="text-white break-words">${msg.text}</p>`;
+            }
+            item.innerHTML = `
+                <div class="flex flex-col max-w-xs md:max-w-md p-3 rounded-lg bg-gray-700">
+                    <span class="font-bold text-sm text-gray-300">${msg.user}</span>
+                    ${content}
+                </div>
+            `;
+            messages.appendChild(item);
+            messages.scrollTop = messages.scrollHeight;
+        }
+
+        form.addEventListener('submit', (e) => {
+            e.preventDefault();
+            if (input.value && usernameInput.value) {
+                socket.emit('chat message', { user: usernameInput.value, text: input.value });
+                input.value = '';
+            }
+        });
+
+        socket.on('chat message', (msg) => addMessage(msg));
+        socket.on('load history', (history) => history.forEach(msg => addMessage(msg)));
+    </script>
+</body>
+</html>
