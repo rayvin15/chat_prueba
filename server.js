@@ -23,10 +23,7 @@ cloudinary.config({
 
 const storage = new CloudinaryStorage({
     cloudinary: cloudinary,
-    params: {
-        folder: 'chat_app_pro', // Cambié el nombre de la carpeta para no mezclar
-        resource_type: 'auto'
-    },
+    params: { folder: 'chat_app_pro', resource_type: 'auto' },
 });
 const upload = multer({ storage: storage });
 
@@ -52,6 +49,15 @@ const MessageSchema = new mongoose.Schema({
 });
 const Message = mongoose.model('Message', MessageSchema);
 
+// NUEVO MODELO PARA SOLICITUDES DE AMISTAD
+const FriendRequestSchema = new mongoose.Schema({
+    requester: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    recipient: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    status: { type: String, enum: ['pending', 'accepted', 'declined'], default: 'pending' }
+}, { timestamps: true });
+const FriendRequest = mongoose.model('FriendRequest', FriendRequestSchema);
+
+
 // =================================================================
 //                      CONFIGURACIÓN DEL SERVIDOR
 // =================================================================
@@ -74,7 +80,6 @@ app.use(express.static(path.join(__dirname, 'public')));
 const authenticateToken = (req, res, next) => {
     const authHeader = req.headers['authorization'];
     const token = authHeader && authHeader.split(' ')[1];
-
     if (token == null) return res.sendStatus(401);
 
     jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
@@ -88,69 +93,111 @@ const authenticateToken = (req, res, next) => {
 //                      RUTAS DE LA API
 // =================================================================
 
+// (Rutas de Registro y Login sin cambios)
 app.post('/api/auth/register', async (req, res) => {
     try {
         const { username, password } = req.body;
         if (!username || !password) return res.status(400).send('Usuario y contraseña requeridos.');
         if (password.length < 6) return res.status(400).send('La contraseña debe tener al menos 6 caracteres.');
-
         const existingUser = await User.findOne({ username });
         if (existingUser) return res.status(400).send('El nombre de usuario ya existe.');
-
         const hashedPassword = await bcrypt.hash(password, 10);
         const newUser = new User({ username, password: hashedPassword });
         await newUser.save();
         res.status(201).send('Usuario registrado con éxito.');
-    } catch (error) {
-        res.status(500).send('Error al registrar el usuario.');
-    }
+    } catch (error) { res.status(500).send('Error al registrar el usuario.'); }
 });
-
 app.post('/api/auth/login', async (req, res) => {
     const { username, password } = req.body;
     const user = await User.findOne({ username });
     if (user == null) return res.status(400).send('Credenciales incorrectas.');
-
     if (await bcrypt.compare(password, user.password)) {
         const accessToken = jwt.sign({ id: user._id, username: user.username }, process.env.JWT_SECRET, { expiresIn: '1d' });
         res.json({ accessToken: accessToken, userId: user._id, username: user.username });
-    } else {
-        res.status(400).send('Credenciales incorrectas.');
-    }
+    } else { res.status(400).send('Credenciales incorrectas.'); }
 });
 
-app.get('/api/users/search', authenticateToken, async (req, res) => {
+app.get('/api/users/search', authenticateToken, async (req, res) => { /* sin cambios */
     const { query } = req.query;
     if (!query) return res.json([]);
     const users = await User.find({ username: new RegExp(query, 'i'), _id: { $ne: req.user.id } }).select('username _id').limit(10);
     res.json(users);
 });
-
-app.post('/api/friends/add', authenticateToken, async (req, res) => {
-    const { friendId } = req.body;
-    await User.findByIdAndUpdate(req.user.id, { $addToSet: { friends: friendId } });
-    await User.findByIdAndUpdate(friendId, { $addToSet: { friends: req.user.id } });
-    res.send('Amigo añadido.');
-});
-
-app.get('/api/me/data', authenticateToken, async (req, res) => {
+app.get('/api/me/data', authenticateToken, async (req, res) => { /* sin cambios */
     const user = await User.findById(req.user.id).populate('friends', 'username');
     if (!user) return res.sendStatus(404);
     res.json(user);
 });
-
-app.post('/upload', authenticateToken, upload.single('file'), (req, res) => {
+app.post('/upload', authenticateToken, upload.single('file'), (req, res) => { /* sin cambios */
     if (!req.file) return res.status(400).json({ error: 'No se subió ningún archivo.' });
     res.json({ url: req.file.path, type: req.file.mimetype.startsWith('image') ? 'image' : 'video' });
+});
+
+// --- NUEVA LÓGICA DE SOLICITUDES DE AMISTAD ---
+app.post('/api/friends/request', authenticateToken, async (req, res) => {
+    const { recipientId } = req.body;
+    const requesterId = req.user.id;
+
+    // Evitar auto-solicitud y solicitudes duplicadas
+    if (requesterId === recipientId) return res.status(400).send('No puedes enviarte una solicitud a ti mismo.');
+    const existingRequest = await FriendRequest.findOne({
+        $or: [
+            { requester: requesterId, recipient: recipientId },
+            { requester: recipientId, recipient: requesterId }
+        ]
+    });
+    if (existingRequest) return res.status(400).send('Ya existe una solicitud de amistad o ya son amigos.');
+
+    const newRequest = new FriendRequest({ requester: requesterId, recipient: recipientId });
+    await newRequest.save();
+    
+    // Notificar al destinatario en tiempo real
+    const recipientSocketId = Object.keys(userSockets).find(key => userSockets[key] === recipientId);
+    if(recipientSocketId) {
+        io.to(recipientSocketId).emit('new friend request');
+    }
+    
+    res.status(201).send('Solicitud de amistad enviada.');
+});
+
+app.get('/api/friends/requests', authenticateToken, async (req, res) => {
+    const requests = await FriendRequest.find({ recipient: req.user.id, status: 'pending' }).populate('requester', 'username');
+    res.json(requests);
+});
+
+app.post('/api/friends/response', authenticateToken, async (req, res) => {
+    const { requestId, status } = req.body; // status: 'accepted' o 'declined'
+    const request = await FriendRequest.findById(requestId);
+
+    if (!request || request.recipient.toString() !== req.user.id) {
+        return res.status(404).send('Solicitud no encontrada.');
+    }
+
+    request.status = status;
+    await request.save();
+
+    if (status === 'accepted') {
+        await User.findByIdAndUpdate(request.requester, { $addToSet: { friends: request.recipient } });
+        await User.findByIdAndUpdate(request.recipient, { $addToSet: { friends: request.requester } });
+    }
+    
+    // Notificar al que envió la solicitud sobre la respuesta
+    const requesterSocketId = Object.keys(userSockets).find(key => userSockets[key] === request.requester.toString());
+    if(requesterSocketId) {
+        io.to(requesterSocketId).emit('friend request accepted');
+    }
+    
+    res.send('Respuesta enviada.');
 });
 
 // =================================================================
 //                      LÓGICA DE WEBSOCKETS
 // =================================================================
-io.use((socket, next) => {
+const userSockets = {}; // Para mapear socket.id a user.id
+
+io.use((socket, next) => { /* sin cambios */
     const token = socket.handshake.auth.token;
     if (!token) return next(new Error('Authentication error: No token'));
-    
     jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
         if (err) return next(new Error('Authentication error: Invalid token'));
         socket.user = user;
@@ -160,42 +207,36 @@ io.use((socket, next) => {
 
 io.on('connection', (socket) => {
     console.log(`✅ Usuario autenticado conectado: ${socket.user.username}`);
+    userSockets[socket.id] = socket.user.id;
 
-    socket.on('join chat', async (friendId) => {
+    socket.on('join chat', async (friendId) => { /* sin cambios */
         const userIds = [socket.user.id, friendId].sort();
         const chatId = userIds.join('_');
         socket.join(chatId);
-        
         const messages = await Message.find({ chatId }).sort({ timestamp: -1 }).limit(50).populate('sender', 'username');
         socket.emit('load history', { chatId, messages: messages.reverse() });
     });
 
-    socket.on('chat message', async (data) => {
+    socket.on('chat message', async (data) => { /* sin cambios */
         const { friendId, message } = data;
         const userIds = [socket.user.id, friendId].sort();
         const chatId = userIds.join('_');
-
-        const newMessage = new Message({
-            chatId,
-            sender: socket.user.id,
-            text: message.text,
-            type: message.type || 'text',
-            url: message.url
-        });
+        const newMessage = new Message({ chatId, sender: socket.user.id, text: message.text, type: message.type || 'text', url: message.url });
         await newMessage.save();
-
         const populatedMessage = await Message.findById(newMessage._id).populate('sender', 'username');
         io.to(chatId).emit('chat message', populatedMessage);
     });
 
     socket.on('disconnect', () => {
         console.log(`❌ Usuario desconectado: ${socket.user.username}`);
+        delete userSockets[socket.id];
     });
 });
 
 // =================================================================
 //                      INICIAR SERVIDOR
 // =================================================================
-app.listen(PORT, () => {
+// LA CORRECCIÓN MÁS IMPORTANTE ESTÁ AQUÍ
+server.listen(PORT, () => {
     console.log(`🚀 Servidor PRO corriendo en el puerto ${PORT}`);
 });

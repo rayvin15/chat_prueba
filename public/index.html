@@ -9,7 +9,7 @@
 </head>
 <body class="bg-gray-900 text-white font-sans">
 
-    <!-- Vista de Login / Registro (se muestra al principio) -->
+    <!-- Vista de Login / Registro -->
     <div id="auth-view" class="flex items-center justify-center h-screen">
         <div class="bg-gray-800 p-8 rounded-lg shadow-xl w-full max-w-sm">
             <h2 class="text-2xl font-bold text-center mb-6">Bienvenido</h2>
@@ -25,17 +25,24 @@
         </div>
     </div>
 
-    <!-- Vista Principal del Chat (oculta al principio) -->
+    <!-- Vista Principal del Chat -->
     <div id="chat-view" class="hidden h-screen flex">
         <!-- Barra Lateral -->
         <aside class="w-full md:w-1/4 bg-gray-800 p-4 flex flex-col border-r border-gray-700">
             <div id="user-profile" class="mb-4 text-center"></div>
+            
+            <!-- NUEVA SECCIÓN DE SOLICITUDES -->
+            <div id="requests-section" class="mb-4">
+                <h3 class="text-lg font-bold mb-2">Solicitudes de Amistad</h3>
+                <ul id="request-list" class="space-y-2 max-h-32 overflow-y-auto"></ul>
+            </div>
+
             <h3 class="text-lg font-bold mb-2">Amigos</h3>
             <ul id="friend-list" class="flex-1 overflow-y-auto mb-4"></ul>
             
             <div class="mt-auto">
                 <div class="relative">
-                    <input type="text" id="search-user" placeholder="Buscar y añadir amigo..." class="w-full bg-gray-700 p-2 rounded">
+                    <input type="text" id="search-user" placeholder="Buscar usuario..." class="w-full bg-gray-700 p-2 rounded">
                     <ul id="search-results" class="absolute bottom-full mb-1 w-full bg-gray-600 rounded max-h-48 overflow-y-auto"></ul>
                 </div>
                 <button id="logout-btn" class="mt-4 w-full bg-red-600 p-2 rounded font-bold hover:bg-red-700 transition-colors">Cerrar Sesión</button>
@@ -45,7 +52,7 @@
         <!-- Área Principal del Chat -->
         <main class="w-full md:w-3/4 flex flex-col">
             <div id="chat-welcome" class="flex-1 flex items-center justify-center text-gray-500 text-center p-4">
-                <p>Selecciona un amigo de la lista para comenzar a chatear.<br>Si no tienes amigos, ¡busca y añade uno!</p>
+                <p>Selecciona un amigo de la lista para comenzar a chatear.<br>Si no tienes amigos, ¡busca y envía una solicitud!</p>
             </div>
             
             <div id="chat-area" class="hidden flex-1 flex flex-col bg-gray-900">
@@ -73,92 +80,86 @@
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
-        // Lógica súper completa del frontend
-        const authView = document.getElementById('auth-view');
-        const chatView = document.getElementById('chat-view');
-        const authForm = document.getElementById('auth-form');
-        const authError = document.getElementById('auth-error');
-        const friendList = document.getElementById('friend-list');
-        const searchUser = document.getElementById('search-user');
-        const searchResults = document.getElementById('search-results');
-        const logoutBtn = document.getElementById('logout-btn');
-        const userProfile = document.getElementById('user-profile');
-        
-        const chatWelcome = document.getElementById('chat-welcome');
-        const chatArea = document.getElementById('chat-area');
-        const chatHeader = document.getElementById('chat-header');
-        const messages = document.getElementById('messages');
-        const messageForm = document.getElementById('message-form');
-        const input = document.getElementById('input');
-        const fileUpload = document.getElementById('file-upload');
-        const emojiBtn = document.getElementById('emoji-btn');
+        // --- Referencias al DOM ---
+        const authView = document.getElementById('auth-view'), chatView = document.getElementById('chat-view');
+        const authForm = document.getElementById('auth-form'), authError = document.getElementById('auth-error');
+        const friendList = document.getElementById('friend-list'), requestList = document.getElementById('request-list');
+        const searchUser = document.getElementById('search-user'), searchResults = document.getElementById('search-results');
+        const logoutBtn = document.getElementById('logout-btn'), userProfile = document.getElementById('user-profile');
+        const chatWelcome = document.getElementById('chat-welcome'), chatArea = document.getElementById('chat-area');
+        const chatHeader = document.getElementById('chat-header'), messages = document.getElementById('messages');
+        const messageForm = document.getElementById('message-form'), input = document.getElementById('input');
+        const fileUpload = document.getElementById('file-upload'), emojiBtn = document.getElementById('emoji-btn');
         const emojiPickerContainer = document.getElementById('emoji-picker-container');
         
-        let socket;
-        let currentChatFriend = null;
-        let currentUser = {};
+        let socket, currentChatFriend = null, currentUser = {};
 
-        // ================== LÓGICA DE AUTENTICACIÓN ==================
-        authForm.addEventListener('submit', async (e) => {
+        // --- API Helpers ---
+        const api = {
+            async call(endpoint, method = 'GET', body = null) {
+                const token = localStorage.getItem('token');
+                const options = {
+                    method,
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                };
+                if (body) {
+                    if (body instanceof FormData) {
+                        options.body = body;
+                    } else {
+                        options.headers['Content-Type'] = 'application/json';
+                        options.body = JSON.stringify(body);
+                    }
+                }
+                const res = await fetch(endpoint, options);
+                if (!res.ok) throw new Error(await res.text());
+                return res.headers.get('Content-Type')?.includes('json') ? res.json() : res.text();
+            }
+        };
+
+        // --- Lógica de Autenticación ---
+        authForm.addEventListener('submit', async e => {
             e.preventDefault();
             const action = e.submitter.value;
             const username = document.getElementById('username').value;
             const password = document.getElementById('password').value;
             authError.textContent = '';
-            
             try {
-                const res = await fetch(`/api/auth/${action}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password })
-                });
-
-                if (!res.ok) throw new Error(await res.text());
-
                 if (action === 'register') {
+                    await api.call('/api/auth/register', 'POST', { username, password });
                     alert('¡Registro exitoso! Ahora inicia sesión.');
                     authForm.reset();
                 } else {
-                    const data = await res.json();
+                    const data = await api.call('/api/auth/login', 'POST', { username, password });
                     localStorage.setItem('token', data.accessToken);
                     localStorage.setItem('userId', data.userId);
                     localStorage.setItem('username', data.username);
                     initChat();
                 }
-            } catch (err) {
-                authError.textContent = err.message;
-            }
+            } catch (err) { authError.textContent = err.message; }
         });
-
         logoutBtn.addEventListener('click', () => {
             localStorage.clear();
             if (socket) socket.disconnect();
             location.reload();
         });
 
-
-        // ================== LÓGICA PRINCIPAL DEL CHAT ==================
+        // --- Lógica Principal del Chat ---
         function initChat() {
             authView.classList.add('hidden');
             chatView.classList.remove('hidden');
-
             const token = localStorage.getItem('token');
             socket = io({ auth: { token } });
-            
-            currentUser.id = localStorage.getItem('userId');
-            currentUser.username = localStorage.getItem('username');
+            currentUser = { id: localStorage.getItem('userId'), username: localStorage.getItem('username') };
             userProfile.innerHTML = `Conectado como: <span class="font-bold">${currentUser.username}</span>`;
-
             loadUserData();
+            loadFriendRequests();
             setupSocketListeners();
         }
 
         async function loadUserData() {
-            const res = await fetch('/api/me/data', {
-                headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-            });
-            const user = await res.json();
-            
+            const user = await api.call('/api/me/data');
             friendList.innerHTML = '';
             user.friends.forEach(friend => {
                 const li = document.createElement('li');
@@ -169,7 +170,6 @@
                 friendList.appendChild(li);
             });
         }
-        
         function startChat(friend) {
             currentChatFriend = friend;
             chatWelcome.classList.add('hidden');
@@ -179,132 +179,104 @@
             socket.emit('join chat', friend._id);
         }
 
-        // ================== BÚSQUEDA DE AMIGOS ==================
+        // --- Lógica de Solicitudes de Amistad ---
+        async function loadFriendRequests() {
+            const requests = await api.call('/api/friends/requests');
+            requestList.innerHTML = '';
+            requests.forEach(req => {
+                const li = document.createElement('li');
+                li.className = 'p-2 bg-gray-700 rounded flex justify-between items-center';
+                li.innerHTML = `<span>${req.requester.username}</span>
+                                <div class="flex gap-2">
+                                    <button class="accept-btn text-green-400 text-xs">Aceptar</button>
+                                    <button class="decline-btn text-red-400 text-xs">Rechazar</button>
+                                </div>`;
+                li.querySelector('.accept-btn').onclick = () => respondToRequest(req._id, 'accepted');
+                li.querySelector('.decline-btn').onclick = () => respondToRequest(req._id, 'declined');
+                requestList.appendChild(li);
+            });
+        }
+        async function respondToRequest(requestId, status) {
+            await api.call('/api/friends/response', 'POST', { requestId, status });
+            loadFriendRequests();
+            if (status === 'accepted') loadUserData();
+        }
         let searchTimeout;
         searchUser.addEventListener('input', () => {
             clearTimeout(searchTimeout);
             searchTimeout = setTimeout(async () => {
                 const query = searchUser.value.trim();
-                if(query.length < 2) {
-                    searchResults.innerHTML = '';
-                    return;
-                }
-                const res = await fetch(`/api/users/search?query=${query}`, {
-                    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-                });
-                const users = await res.json();
+                if(query.length < 2) { searchResults.innerHTML = ''; return; }
+                const users = await api.call(`/api/users/search?query=${query}`);
                 searchResults.innerHTML = '';
                 users.forEach(user => {
                     const li = document.createElement('li');
                     li.textContent = `+ ${user.username}`;
                     li.className = 'p-2 text-sm text-green-400 hover:bg-gray-500 cursor-pointer';
-                    li.onclick = () => addFriend(user._id);
+                    li.onclick = () => sendFriendRequest(user._id);
                     searchResults.appendChild(li);
                 });
             }, 300);
         });
-        
-        async function addFriend(friendId) {
-            await fetch('/api/friends/add', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${localStorage.getItem('token')}` },
-                body: JSON.stringify({ friendId })
-            });
-            searchUser.value = '';
-            searchResults.innerHTML = '';
-            loadUserData();
+        async function sendFriendRequest(recipientId) {
+            try {
+                await api.call('/api/friends/request', 'POST', { recipientId });
+                alert('Solicitud enviada!');
+                searchUser.value = '';
+                searchResults.innerHTML = '';
+            } catch (err) { alert(err.message); }
         }
-        
-        // ================== MANEJO DE MENSAJES Y ARCHIVOS ==================
+
+        // --- Sockets y Mensajes ---
         function setupSocketListeners() {
-            socket.on('connect_error', (err) => {
-                if (err.message.includes('Authentication error')) {
-                    logoutBtn.click(); // Si el token es inválido, cerramos sesión
-                }
-            });
-
-            socket.on('load history', (data) => {
-                messages.innerHTML = '';
-                data.messages.forEach(msg => displayMessage(msg));
-            });
-
-            socket.on('chat message', (msg) => {
+            socket.on('connect_error', err => { if (err.message.includes('Authentication')) logoutBtn.click(); });
+            socket.on('load history', data => { messages.innerHTML = ''; data.messages.forEach(msg => displayMessage(msg)); });
+            socket.on('chat message', msg => {
                 if (currentChatFriend && (msg.sender._id === currentChatFriend._id || msg.sender._id === currentUser.id)) {
                     displayMessage(msg);
                 }
             });
+            // Notificaciones en tiempo real
+            socket.on('new friend request', () => { alert('¡Nueva solicitud de amistad!'); loadFriendRequests(); });
+            socket.on('friend request accepted', () => { alert('¡Tu solicitud de amistad fue aceptada!'); loadUserData(); });
         }
-        
-        messageForm.addEventListener('submit', (e) => {
+        messageForm.addEventListener('submit', e => {
             e.preventDefault();
             if (input.value && currentChatFriend) {
-                socket.emit('chat message', { 
-                    friendId: currentChatFriend._id,
-                    message: { text: input.value }
-                });
+                socket.emit('chat message', { friendId: currentChatFriend._id, message: { text: input.value }});
                 input.value = '';
             }
         });
-        
-        fileUpload.addEventListener('change', async (e) => {
+        fileUpload.addEventListener('change', async e => {
             const file = e.target.files[0];
             if (!file || !currentChatFriend) return;
-            
             const formData = new FormData();
             formData.append('file', file);
-            
             try {
-                const res = await fetch('/upload', { 
-                    method: 'POST', 
-                    headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
-                    body: formData 
-                });
-                if (!res.ok) throw new Error('Error en la subida');
-                const data = await res.json();
-                socket.emit('chat message', {
-                    friendId: currentChatFriend._id,
-                    message: { type: data.type, url: data.url }
-                });
-            } catch (err) {
-                alert('No se pudo subir el archivo.');
-            } finally {
-                fileUpload.value = ''; // Resetear el input
-            }
+                const data = await api.call('/upload', 'POST', formData);
+                socket.emit('chat message', { friendId: currentChatFriend._id, message: { type: data.type, url: data.url } });
+            } catch (err) { alert('No se pudo subir el archivo.'); } 
+            finally { fileUpload.value = ''; }
         });
-        
         function displayMessage(msg) {
             const item = document.createElement('li');
             const isOwnMessage = msg.sender._id === currentUser.id;
-            
-            let content = '';
-            if (msg.type === 'image') {
-                content = `<img src="${msg.url}" class="max-w-[250px] md:max-w-xs rounded-md mt-1 cursor-pointer" onclick="window.open(this.src, '_blank')">`;
-            } else if (msg.type === 'video') {
-                content = `<video src="${msg.url}" controls class="max-w-[250px] md:max-w-xs rounded-md mt-1"></video>`;
-            } else {
-                content = `<p class="text-white break-words">${msg.text}</p>`;
-            }
-
+            let content = msg.type === 'image' ? `<img src="${msg.url}" class="max-w-[250px] md:max-w-xs rounded-md mt-1 cursor-pointer" onclick="window.open(this.src, '_blank')">`
+                        : msg.type === 'video' ? `<video src="${msg.url}" controls class="max-w-[250px] md:max-w-xs rounded-md mt-1"></video>`
+                        : `<p class="text-white break-words">${msg.text}</p>`;
             item.className = `flex flex-col w-fit max-w-lg p-2 rounded-lg ${isOwnMessage ? 'self-end bg-indigo-600' : 'self-start bg-gray-700'}`;
-            item.innerHTML = `
-                ${!isOwnMessage ? `<span class="font-bold text-xs text-gray-400">${msg.sender.username}</span>` : ''}
-                ${content}
-            `;
+            item.innerHTML = `${!isOwnMessage ? `<span class="font-bold text-xs text-gray-400">${msg.sender.username}</span>` : ''}${content}`;
             messages.appendChild(item);
             messages.scrollTop = messages.scrollHeight;
         }
 
-        // Emojis
+        // --- Emojis y Arranque ---
         emojiBtn.addEventListener('click', () => emojiPickerContainer.classList.toggle('hidden'));
-        document.querySelector('emoji-picker').addEventListener('emoji-click', event => {
-            input.value += event.detail.unicode;
+        document.querySelector('emoji-picker').addEventListener('emoji-click', e => {
+            input.value += e.detail.unicode;
             emojiPickerContainer.classList.add('hidden');
         });
-
-        // ================== INICIO DE LA APP ==================
-        if (localStorage.getItem('token')) {
-            initChat();
-        }
+        if (localStorage.getItem('token')) initChat();
     </script>
 </body>
 </html>
