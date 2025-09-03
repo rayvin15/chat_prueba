@@ -3,41 +3,58 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Chat Pro: Grupos</title>
+    <title>Chat Pro: Final</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="module" src="https://cdn.jsdelivr.net/npm/emoji-picker-element@^1/index.js"></script>
     <style>
         .flex-1 { min-height: 0; }
-        .unseen-status-border { border-color: #a855f7; }
+        .unseen-status-border { border: 3px solid #a855f7; }
+        .online-indicator { background-color: #10b981; box-shadow: 0 0 0 2px #1f2937, 0 0 6px rgba(16, 185, 129, 0.6); }
+        .offline-indicator { background-color: #6b7280; }
         #message-context-menu { position: fixed; z-index: 1000; }
-        .message-status-ticks { font-size: 0.9rem; }
-        .ticks-read { color: #60a5fa; }
+        .message-status-ticks { font-size: 0.8rem; color: #9ca3af; transition: color 0.2s; }
+        .ticks-read { color: #60a5fa !important; }
         .sidebar-item:hover .sidebar-item-actions { opacity: 1; }
+        .sidebar-item-actions { opacity: 0; transition: opacity 0.2s ease; }
+        .typing-indicator { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #60a5fa; animation: typing 1.4s infinite ease-in-out; }
+        .typing-indicator:nth-child(2) { animation-delay: 0.2s; }
+        .typing-indicator:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes typing { 0%, 80%, 100% { opacity: 0.2; } 40% { opacity: 1; } }
+        .message-bubble { word-wrap: break-word; word-break: break-word; hyphens: auto; }
+        .connection-status { position: fixed; top: 10px; right: 10px; z-index: 1000; padding: 8px 12px; border-radius: 6px; font-size: 0.875rem; font-weight: 500; transition: all 0.3s; }
+        .connection-status.connected { background: #059669; color: white; }
+        .connection-status.disconnected { background: #dc2626; color: white; }
+        .connection-status.reconnecting { background: #d97706; color: white; }
+        .toast { position: fixed; bottom: 20px; right: 20px; z-index: 1000; padding: 12px 16px; border-radius: 8px; color: white; font-weight: 500; transform: translateX(400px); transition: transform 0.3s ease; }
+        .toast.show { transform: translateX(0); }
+        .toast.success { background: #059669; }
+        .toast.error { background: #dc2626; }
+        .toast.info { background: #0284c7; }
     </style>
 </head>
 <body class="bg-gray-900 text-white font-sans overflow-hidden">
+    <!-- Indicador de conexión -->
+    <div id="connection-status" class="connection-status connected">Conectado</div>
 
     <!-- Vista de Login / Registro -->
-    <div id="auth-view" class="flex items-center justify-center h-screen"><div class="bg-gray-800 p-8 rounded-lg shadow-xl w-full max-w-sm"><h2 class="text-2xl font-bold text-center mb-6">Bienvenido</h2><form id="auth-form" class="space-y-4"><input type="text" id="username" placeholder="Nombre de usuario" class="w-full bg-gray-700 p-3 rounded" required><input type="password" id="password" placeholder="Contraseña (mín. 6 caracteres)" class="w-full bg-gray-700 p-3 rounded" required><div class="flex gap-4"><button type="submit" name="action" value="login" class="w-full bg-indigo-600 p-3 rounded font-bold hover:bg-indigo-700 transition-colors">Iniciar Sesión</button><button type="submit" name="action" value="register" class="w-full bg-green-600 p-3 rounded font-bold hover:bg-green-700 transition-colors">Registrar</button></div></form><p id="auth-error" class="text-red-400 text-center mt-4 h-5"></p></div></div>
+    <div id="auth-view" class="flex items-center justify-center h-screen"><div class="bg-gray-800 p-8 rounded-lg shadow-xl w-full max-w-sm"><h2 class="text-2xl font-bold text-center mb-6">Chat Pro</h2><form id="auth-form" class="space-y-4"><div><input type="text" id="username" placeholder="Nombre de usuario" class="w-full bg-gray-700 p-3 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500" required maxlength="20" minlength="3"><small class="text-gray-400 text-xs">3-20 caracteres</small></div><div><input type="password" id="password" placeholder="Contraseña" class="w-full bg-gray-700 p-3 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500" required minlength="6"><small class="text-gray-400 text-xs">Mínimo 6 caracteres</small></div><div class="flex gap-4"><button type="submit" name="action" value="login" class="w-full bg-indigo-600 p-3 rounded font-bold hover:bg-indigo-700 transition-colors">Iniciar Sesión</button><button type="submit" name="action" value="register" class="w-full bg-green-600 p-3 rounded font-bold hover:bg-green-700 transition-colors">Registrar</button></div></form><p id="auth-error" class="text-red-400 text-center mt-4 min-h-[1.25rem] text-sm"></p></div></div>
 
     <!-- Vista Principal del Chat -->
     <div id="chat-view" class="hidden h-screen flex">
         <!-- Barra Lateral -->
-        <aside class="w-full md:w-1/3 lg:w-1/4 bg-gray-800 p-4 flex flex-col border-r border-gray-700"><div id="user-profile" class="mb-4 text-center"></div><div class="mb-4"><h3 class="text-lg font-bold mb-2">Estados</h3><div id="status-list" class="flex gap-3 overflow-x-auto pb-2"><div id="add-status-btn" class="flex-shrink-0 flex flex-col items-center justify-center w-16 h-16 bg-gray-700 rounded-full cursor-pointer text-2xl hover:bg-gray-600 transition-colors">+</div><input id="status-upload" type="file" accept="image/*,video/*" class="hidden"></div></div><div id="requests-section" class="mb-4"><h3 class="text-lg font-bold mb-2">Solicitudes</h3><ul id="request-list" class="space-y-2 max-h-32 overflow-y-auto"></ul></div>
-        <div class="flex justify-between items-center mb-2"><h3 class="text-lg font-bold">Chats</h3><button id="create-group-btn" class="text-2xl hover:text-indigo-400">+</button></div>
-        <ul id="chat-list" class="flex-1 overflow-y-auto mb-4"></ul>
-        <div class="mt-auto"><div class="relative"><input type="text" id="search-user" placeholder="Buscar usuario..." class="w-full bg-gray-700 p-2 rounded"><ul id="search-results" class="absolute bottom-full mb-1 w-full bg-gray-600 rounded max-h-48 overflow-y-auto z-10"></ul></div><button id="logout-btn" class="mt-4 w-full bg-red-600 p-2 rounded font-bold hover:bg-red-700 transition-colors">Cerrar Sesión</button></div></aside>
+        <aside class="w-full md:w-1/3 lg:w-1/4 bg-gray-800 p-4 flex flex-col border-r border-gray-700"><div id="user-profile" class="mb-4 text-center p-3 bg-gray-700 rounded-lg"><div id="user-avatar" class="w-12 h-12 bg-indigo-600 rounded-full mx-auto mb-2 flex items-center justify-center text-lg font-bold"></div><div id="user-name" class="font-semibold"></div><div id="user-status" class="text-xs text-gray-400">En línea</div></div><div class="mb-4"><h3 class="text-lg font-bold mb-2 flex items-center gap-2"><span>Estados</span><span id="status-count" class="text-xs bg-gray-600 px-2 py-1 rounded-full">0</span></h3><div id="status-list" class="flex gap-3 overflow-x-auto pb-2"><div id="add-status-btn" class="flex-shrink-0 flex flex-col items-center justify-center w-16 h-16 bg-gray-700 rounded-full cursor-pointer text-2xl hover:bg-gray-600 transition-colors">+</div><input id="status-upload" type="file" accept="image/*,video/*" class="hidden"></div></div><div id="requests-section" class="mb-4"><h3 class="text-lg font-bold mb-2 flex items-center gap-2"><span>Solicitudes</span><span id="requests-count" class="text-xs bg-red-600 px-2 py-1 rounded-full hidden">0</span></h3><ul id="request-list" class="space-y-2 max-h-32 overflow-y-auto"></ul></div><div class="flex justify-between items-center mb-2"><h3 class="text-lg font-bold">Chats</h3><button id="create-group-btn" class="text-2xl hover:text-indigo-400 transition-colors" title="Crear grupo">+</button></div><ul id="chat-list" class="flex-1 overflow-y-auto mb-4 space-y-1"></ul><div class="mt-auto space-y-3"><div class="relative"><input type="text" id="search-user" placeholder="Buscar usuario..." class="w-full bg-gray-700 p-2 rounded focus:outline-none focus:ring-2 focus:ring-indigo-500"><ul id="search-results" class="absolute bottom-full mb-1 w-full bg-gray-600 rounded max-h-48 overflow-y-auto z-10 shadow-lg"></ul></div><button id="logout-btn" class="w-full bg-red-600 p-2 rounded font-bold hover:bg-red-700 transition-colors">Cerrar Sesión</button></div></aside>
 
         <!-- Área Principal del Chat -->
-        <main class="w-full md:w-2/3 lg:w-3/4 flex flex-col h-screen bg-gray-900"><div id="chat-welcome" class="flex-1 flex items-center justify-center text-gray-500 text-center p-4"><p>Selecciona un chat para comenzar a conversar.</p></div><div id="chat-area" class="hidden flex-1 flex-col overflow-hidden"><header id="chat-header" class="bg-gray-800 p-4 font-bold border-b border-gray-700 flex justify-between items-center"></header><ul id="messages" class="flex-1 p-4 space-y-4 overflow-y-auto"></ul><div id="emoji-picker-container" class="hidden absolute bottom-20 right-4 z-10"><emoji-picker class="dark"></emoji-picker></div><form id="message-form" class="bg-gray-800 p-4 flex items-center gap-2 border-t border-gray-700"><div class="relative flex-1"><input id="input" placeholder="Escribe un mensaje..." class="bg-gray-700 p-2 rounded-md w-full focus:outline-none focus:ring-2 focus:ring-indigo-500"><button id="emoji-btn" type="button" class="absolute right-2 top-1/2 -translate-y-1/2 text-xl hover:scale-110 transition-transform">😀</button></div><label for="file-upload" class="bg-gray-600 p-2 rounded-md cursor-pointer hover:bg-gray-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg></label><input id="file-upload" type="file" class="hidden"><button id="record-voice-btn" type="button" class="bg-gray-600 p-2 rounded-md hover:bg-gray-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg></button><button type="submit" class="bg-indigo-600 font-bold py-2 px-4 rounded-md hover:bg-indigo-700 transition-colors">Enviar</button></form></div></main>
+        <main class="w-full md:w-2/3 lg:w-3/4 flex flex-col h-screen bg-gray-900"><div id="chat-welcome" class="flex-1 flex items-center justify-center text-gray-500 text-center p-4"><div><div class="text-6xl mb-4">💬</div><p class="text-xl mb-2">Bienvenido a Chat Pro</p><p>Selecciona un chat para comenzar a conversar</p></div></div><div id="chat-area" class="hidden flex-1 flex-col overflow-hidden"><header id="chat-header" class="bg-gray-800 p-4 border-b border-gray-700 flex justify-between items-center"><div class="flex items-center gap-3"><div id="chat-avatar" class="w-10 h-10 bg-indigo-600 rounded-full flex items-center justify-center font-bold"></div><div><div id="chat-name" class="font-bold"></div><div id="chat-status" class="text-xs text-gray-400"></div></div></div><div class="flex gap-2"><button id="chat-info-btn" class="p-2 hover:bg-gray-700 rounded transition-colors">ℹ️</button></div></header><div class="flex-1 flex flex-col overflow-hidden"><ul id="messages" class="flex-1 p-4 space-y-3 overflow-y-auto scroll-smooth"></ul><div id="typing-indicator" class="hidden px-4 py-2"><div class="flex items-center gap-2 text-sm text-gray-400"><span id="typing-user"></span><span>está escribiendo</span><div class="flex gap-1"><div class="typing-indicator"></div><div class="typing-indicator"></div><div class="typing-indicator"></div></div></div></div></div><div id="emoji-picker-container" class="hidden absolute bottom-20 right-4 z-10"><emoji-picker class="dark"></emoji-picker></div><form id="message-form" class="bg-gray-800 p-4 flex items-center gap-2 border-t border-gray-700"><div class="relative flex-1"><input id="input" placeholder="Escribe un mensaje..." maxlength="1000" class="bg-gray-700 p-3 pr-12 rounded-md w-full focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" autocomplete="off"><button id="emoji-btn" type="button" class="absolute right-2 top-1/2 -translate-y-1/2 text-xl hover:scale-110 transition-transform">😀</button></div><label for="file-upload" class="bg-gray-600 p-3 rounded-md cursor-pointer hover:bg-gray-500 transition-colors" title="Subir archivo"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/></svg></label><input id="file-upload" type="file" class="hidden" accept="image/*,video/*,audio/*"><button id="record-voice-btn" type="button" title="Grabar nota de voz" class="bg-gray-600 p-3 rounded-md hover:bg-gray-500 transition-colors"><svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"/></svg></button><button type="submit" class="bg-indigo-600 font-bold py-3 px-6 rounded-md hover:bg-indigo-700 transition-colors">Enviar</button></form></div></main>
     </div>
 
-    <!-- Modales y Menús -->
-    <div id="create-group-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"><div class="bg-gray-800 p-8 rounded-lg w-full max-w-md"><h3 class="text-2xl mb-4">Crear Nuevo Grupo</h3><form id="create-group-form"><input type="text" id="group-name" placeholder="Nombre del grupo" class="w-full bg-gray-700 p-3 rounded mb-4" required><h4 class="mb-2">Añadir amigos:</h4><div id="group-friends-list" class="max-h-48 overflow-y-auto mb-4 border border-gray-700 p-2 rounded"></div><div class="flex gap-4"><button type="submit" class="bg-indigo-600 px-6 py-2 rounded font-bold">Crear</button><button type="button" id="cancel-group-creation" class="bg-gray-600 px-6 py-2 rounded font-bold">Cancelar</button></div></form></div></div>
-    <div id="incoming-call-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"><div class="bg-gray-800 p-8 rounded-lg text-center"><h3 id="incoming-call-from" class="text-2xl mb-4"></h3><p id="incoming-call-type" class="mb-6"></p><div class="flex gap-4"><button id="accept-call-btn" class="bg-green-600 px-6 py-2 rounded font-bold">Aceptar</button><button id="reject-call-btn" class="bg-red-600 px-6 py-2 rounded font-bold">Rechazar</button></div></div></div>
-    <div id="call-view" class="hidden fixed inset-0 bg-gray-900 z-40 flex flex-col items-center justify-center p-4"><div class="relative w-full h-full flex items-center justify-center"><video id="remote-video" autoplay playsinline class="w-full h-full object-cover"></video><video id="local-video" autoplay playsinline muted class="absolute bottom-4 right-4 w-1/4 max-w-xs border-2 border-white rounded-md"></video></div><button id="end-call-btn" class="absolute bottom-10 bg-red-600 p-4 rounded-full font-bold">Colgar</button></div>
-    <div id="status-viewer" class="hidden fixed inset-0 bg-black bg-opacity-90 flex flex-col items-center justify-center z-50"><button id="close-status-viewer" class="absolute top-4 right-4 text-white text-3xl">&times;</button><div id="status-content" class="max-w-md max-h-[90vh]"></div><div id="status-viewers-list" class="text-xs text-gray-400 mt-2"></div></div>
-    <div id="message-context-menu" class="hidden bg-gray-700 rounded-md shadow-lg py-1"><button id="delete-for-me-btn" class="block w-full text-left px-4 py-2 text-sm text-white hover:bg-gray-600">Eliminar para mí</button><button id="delete-for-all-btn" class="block w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-gray-600">Eliminar para todos</button></div>
+    <!-- Modales -->
+    <div id="create-group-modal" class="hidden fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50"><div class="bg-gray-800 p-8 rounded-lg w-full max-w-md max-h-[90vh] overflow-y-auto"><h3 class="text-2xl mb-4">Crear Nuevo Grupo</h3><form id="create-group-form"><input type="text" id="group-name" placeholder="Nombre del grupo" maxlength="50" class="w-full bg-gray-700 p-3 rounded mb-4 focus:outline-none focus:ring-2 focus:ring-indigo-500" required><textarea id="group-description" placeholder="Descripción (opcional)" maxlength="200" class="w-full bg-gray-700 p-3 rounded mb-4 h-20 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"></textarea><h4 class="mb-2">Seleccionar amigos:</h4><div id="group-friends-list" class="max-h-48 overflow-y-auto mb-4 border border-gray-700 p-3 rounded space-y-2"></div><div class="flex gap-4"><button type="submit" class="bg-indigo-600 px-6 py-2 rounded font-bold hover:bg-indigo-700 transition-colors">Crear</button><button type="button" id="cancel-group-creation" class="bg-gray-600 px-6 py-2 rounded font-bold hover:bg-gray-700 transition-colors">Cancelar</button></div></form></div></div>
+    <div id="incoming-call-modal" class="hidden fixed inset-0 bg-black bg-opacity-90 flex items-center justify-center z-50"><div class="bg-gray-800 p-8 rounded-lg text-center"><div class="mb-6"><div class="w-24 h-24 bg-indigo-600 rounded-full mx-auto mb-4 flex items-center justify-center text-2xl font-bold animate-pulse">📞</div><h3 id="incoming-call-from" class="text-2xl mb-2"></h3><p id="incoming-call-type" class="text-gray-400"></p></div><div class="flex gap-6 justify-center"><button id="accept-call-btn" class="bg-green-600 p-4 rounded-full hover:bg-green-700 transition-colors"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"/></svg></button><button id="reject-call-btn" class="bg-red-600 p-4 rounded-full hover:bg-red-700 transition-colors"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/></svg></button></div></div></div>
+    <div id="call-view" class="hidden fixed inset-0 bg-gray-900 z-40 flex flex-col items-center justify-center p-4"><div class="relative w-full h-full flex items-center justify-center"><video id="remote-video" autoplay playsinline class="w-full h-full object-cover rounded-lg"></video><video id="local-video" autoplay playsinline muted class="absolute bottom-4 right-4 w-1/4 max-w-xs border-2 border-white rounded-md"></video></div><div class="absolute bottom-10 flex gap-4"><button id="mute-btn" class="bg-gray-600 p-4 rounded-full hover:bg-gray-500 transition-colors"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.617.761L4.846 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.846l3.537-3.761a1 1 0 011.617.761z" clip-rule="evenodd"/></svg></button><button id="end-call-btn" class="bg-red-600 p-4 rounded-full font-bold hover:bg-red-700 transition-colors"><svg class="w-6 h-6" fill="currentColor" viewBox="0 0 20 20"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"/></svg></button></div></div>
+    <div id="status-viewer" class="hidden fixed inset-0 bg-black bg-opacity-90 flex flex-col items-center justify-center z-50"><button id="close-status-viewer" class="absolute top-4 right-4 text-white text-3xl hover:text-gray-300 transition-colors">&times;</button><div class="absolute top-4 left-4 text-white"><div id="status-owner-name" class="font-bold"></div><div id="status-time" class="text-sm text-gray-300"></div></div><div id="status-content" class="max-w-md max-h-[90vh] flex items-center justify-center"></div><div id="status-viewers-list" class="absolute bottom-4 left-4 text-xs text-gray-400"></div><div class="absolute bottom-4 right-4 text-white flex gap-2"><button id="prev-status" class="p-2 bg-gray-800 rounded-full hover:bg-gray-700 transition-colors">←</button><button id="next-status" class="p-2 bg-gray-800 rounded-full hover:bg-gray-700 transition-colors">→</button></div></div>
+    <div id="message-context-menu" class="hidden bg-gray-700 rounded-md shadow-lg py-1 min-w-[120px]"><button id="reply-message-btn" class="block w-full text-left px-4 py-2 text-sm text-white hover:bg-gray-600 transition-colors">Responder</button><button id="delete-for-me-btn" class="block w-full text-left px-4 py-2 text-sm text-white hover:bg-gray-600 transition-colors">Eliminar para mí</button><button id="delete-for-all-btn" class="block w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-gray-600 transition-colors">Eliminar para todos</button></div>
+    <div id="toast-container"></div>
 
     <script src="/socket.io/socket.io.js"></script>
     <script>
@@ -88,25 +105,76 @@
         async function handleAnswerMade(data) { if (peerConnection) await peerConnection.setRemoteDescription(new RTCSessionDescription(data.answer)); }
         function handleIceCandidate(data) { if (peerConnection && peerConnection.remoteDescription) { peerConnection.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(e => console.error("Error adding ice candidate", e)); } }
         dom.call.endBtn.addEventListener('click', () => { if(remoteCaller) socket.emit('end-call', { to: remoteCaller._id || remoteCaller.id }); closeCall(); });
-        function closeCall() { if (peerConnection) { peerConnection.close(); peerConnection = null; } if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; } dom.call.view.classList.add('hidden'); dom.call.localVideo.srcObject = null; dom.call.remoteVideo.srcObject = null; remoteCaller = null; }
         
-        function showContextMenu(e) { e.preventDefault(); const messageEl = e.currentTarget; const messageId = messageEl.dataset.id; const senderId = messageEl.dataset.senderId; dom.contextMenu.menu.style.top = `${e.clientY}px`; dom.contextMenu.menu.style.left = `${e.clientX}px`; dom.contextMenu.menu.classList.remove('hidden'); dom.contextMenu.forMe.onclick = () => socket.emit('delete message', { messageId, mode: 'self' }); dom.contextMenu.forAll.style.display = senderId === currentUser.id ? 'block' : 'none'; dom.contextMenu.forAll.onclick = () => socket.emit('delete message', { messageId, mode: 'all' }); }
-        document.addEventListener('click', (e) => { if (!dom.contextMenu.menu.contains(e.target)) dom.contextMenu.menu.classList.add('hidden'); if (!dom.media.emojiPicker.contains(e.target) && e.target !== dom.media.emojiBtn) dom.media.emojiPicker.classList.add('hidden'); });
-        dom.media.emojiBtn.addEventListener('click', (e) => { e.stopPropagation(); dom.media.emojiPicker.classList.toggle('hidden'); });
-        document.querySelector('emoji-picker').addEventListener('emoji-click', e => { dom.chat.input.value += e.detail.unicode; });
 
-        const observer = new IntersectionObserver((entries) => {
-            const unreadMessages = entries.filter(entry => entry.isIntersecting)
-                .map(entry => {
-                    const messageEl = entry.target;
-                    if (messageEl.dataset.senderId !== currentUser.id && !messageEl.dataset.isRead) {
-                        messageEl.dataset.isRead = true;
-                        return messageEl.dataset.id;
-                    }
-                    return null;
-                }).filter(Boolean);
-            if (unreadMessages.length > 0) socket.emit('mark as read', { chatId: currentChat._id, messageIds: unreadMessages });
-        }, { root: dom.chat.messages, threshold: 0.9 });
+        function closeCall() {
+            if (peerConnection) {
+                peerConnection.close();
+                peerConnection = null;
+            }
+            if (localStream) {
+                localStream.getTracks().forEach(track => track.stop());
+                localStream = null;
+            }
+            dom.call.view.classList.add('hidden');
+            dom.call.localVideo.srcObject = null;
+            dom.call.remoteVideo.srcObject = null;
+            remoteCaller = null;
+        }
+
+        // --- Menús Contextuales y Emojis (CORREGIDO) ---
+        function showContextMenu(e, msg) {
+            e.preventDefault();
+            
+            const menu = dom.contextMenu.menu;
+            menu.style.top = `${e.clientY}px`;
+            menu.style.left = `${e.clientX}px`;
+            menu.classList.remove('hidden');
+
+            const messageEl = e.currentTarget;
+
+            // Eliminar para mí
+            dom.contextMenu.forMe.onclick = () => {
+                socket.emit('delete message', { messageId: msg._id, mode: 'self' });
+                messageEl.remove(); // Eliminación optimista
+                menu.classList.add('hidden');
+            };
+
+            // Eliminar para todos
+            if (msg.sender._id === currentUser.id) {
+                dom.contextMenu.forAll.style.display = 'block';
+                dom.contextMenu.forAll.onclick = () => {
+                    socket.emit('delete message', { messageId: msg._id, mode: 'all' });
+                    menu.classList.add('hidden');
+                };
+            } else {
+                dom.contextMenu.forAll.style.display = 'none';
+            }
+        }
+
+        document.addEventListener('click', (e) => {
+            // Cierra el menú contextual si se hace clic fuera de él
+            if (!dom.contextMenu.menu.contains(e.target)) {
+                dom.contextMenu.menu.classList.add('hidden');
+            }
+            // Cierra el picker de emojis si se hace clic fuera de él
+            if (!dom.media.emojiPicker.contains(e.target) && e.target !== dom.media.emojiBtn) {
+                dom.media.emojiPicker.classList.add('hidden');
+            }
+        });
+
+        dom.media.emojiBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dom.media.emojiPicker.classList.toggle('hidden');
+        });
+
+        document.querySelector('emoji-picker').addEventListener('emoji-click', e => {
+            dom.chat.input.value += e.detail.unicode;
+            dom.media.emojiPicker.classList.add('hidden');
+            dom.chat.input.focus();
+        });
     </script>
 </body>
 </html>
+
+    
